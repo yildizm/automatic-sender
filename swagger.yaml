@@ -1,0 +1,77 @@
+openapi: 3.0.0
+info:
+  title: Automatic Message Sending System API
+  version: "1.0.0"
+  description: This is an API for an automatic message sending system.
+servers:
+  - url: http://localhost:8080
+    description: Local server
+paths:
+  /start:
+    post:
+      summary: Start automatic message sending
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Already sending messages
+  /stop:
+    post:
+      summary: Stop automatic message sending
+      responses:
+        "200":
+          description: Success
+        "400":
+          description: Not currently sending messages
+  /sent-messages:
+    get:
+      summary: Retrieve a list of sent messages
+      responses:
+        "200":
+          description: A list of sent messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      example: 1
+                    content:
+                      type: string
+                      example: "Hello, this is a test message."
+                    recipient:
+                      type: string
+                      example: "+905551111111"
+                    sent_at:
+                      type: string
+                      format: date-time
+                      example: "2023-05-30T15:04:05Z"
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-ins-auth-key
+  schemas:
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        content:
+          type: string
+          example: "Hello, this is a test message."
+        recipient:
+          type: string
+          example: "+905551111111"
+        sent:
+          type: boolean
+          example: true
+        sent_at:
+          type: string
+          format: date-time
+          example: "2023-05-30T15:04:05Z"
