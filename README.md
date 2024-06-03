@@ -29,12 +29,13 @@ This project is a Go-based system that automatically sends messages retrieved fr
    ```
    DATABASE_URL=postgres://user:password@db:5432/messagesdb?sslmode=disable
     REDIS_URL=redis://redis:6379
-   ```
-### Docker
+   
+## Run
 To run the application using Docker, use the following commands:
 
-```sh
-docker-compose up --build
+    ```sh
+    docker-compose up --build
+    ```
 
 ## Usage
 
