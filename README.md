@@ -24,18 +24,20 @@ This project is a Go-based system that automatically sends messages retrieved fr
    ```sh
    git clone https://github.com/yourusername/automatic-sender.git
    cd automatic-sender
+   ```
 
 2. **Set Up Environment Variables:**:
    ```
    DATABASE_URL=postgres://user:password@db:5432/messagesdb?sslmode=disable
     REDIS_URL=redis://redis:6379
+    ```
    
 ## Run
 To run the application using Docker, use the following commands:
 
-    ```sh
+    sh
     docker-compose up --build
-    ```
+    
 
 ## Usage
 
