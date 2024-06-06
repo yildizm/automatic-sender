@@ -12,6 +12,7 @@ import (
 
 	"github.com/yildizm/automatic-sender/internal/db"
 	"github.com/yildizm/automatic-sender/internal/redis"
+	"golang.org/x/time/rate"
 )
 
 type MessagePayload struct {
@@ -73,8 +74,12 @@ func (p *WorkerPool) Shutdown() {
     close(p.jobs)
     p.wg.Wait()
 }
+var rateLimiter = rate.NewLimiter(1, 5)
 
 func SendMessage(msg db.Message) error {
+    if err := rateLimiter.Wait(context.Background()); err != nil {
+        return fmt.Errorf("rate limiter error: %w", err)
+    }
     payload := MessagePayload{
         To:      msg.Recipient,
         Content: msg.Content,
