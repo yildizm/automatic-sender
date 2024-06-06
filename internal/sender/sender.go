@@ -1,14 +1,18 @@
 package sender
 
 import (
-    "bytes"
-    "encoding/json"
-    "log"
-    "net/http"
-    "time"
-    "github.com/yildizm/automatic-sender/internal/db"
-    "github.com/yildizm/automatic-sender/internal/redis"
-    "fmt"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/cenkalti/backoff/v4"
+	"github.com/yildizm/automatic-sender/internal/db"
+	"github.com/yildizm/automatic-sender/internal/redis"
 )
 
 type MessagePayload struct {
@@ -21,7 +25,60 @@ type Response struct {
     MessageID string `json:"messageId"`
 }
 
-func SendMessage(msg db.Message) error {
+type WorkerPool struct {
+    jobs    chan db.Message
+    wg      sync.WaitGroup
+    ctx     context.Context
+    cancel  context.CancelFunc
+}
+
+func NewWorkerPool(numWorkers int) *WorkerPool {
+    ctx, cancel := context.WithCancel(context.Background())
+    pool := &WorkerPool{
+        jobs:   make(chan db.Message, 10),
+        ctx:    ctx,
+        cancel: cancel,
+    }
+
+    for i := 0; i < numWorkers; i++ {
+        pool.wg.Add(1)
+        go pool.worker()
+    }
+
+    return pool
+}
+
+func (p *WorkerPool) AddJob(msg db.Message) {
+    select {
+    case p.jobs <- msg:
+    case <-p.ctx.Done():
+    }
+}
+
+func (p *WorkerPool) worker() {
+    defer p.wg.Done()
+    for {
+        select {
+        case msg := <-p.jobs:
+            ctx, cancel := context.WithTimeout(p.ctx, 10*time.Second)
+            defer cancel()
+
+            if err := SendMessageWithRetry(ctx, msg); err != nil {
+                log.Println("Error sending message:", err)
+            }
+        case <-p.ctx.Done():
+            return
+        }
+    }
+}
+
+func (p *WorkerPool) Shutdown() {
+    p.cancel()
+    close(p.jobs)
+    p.wg.Wait()
+}
+
+func SendMessage(ctx context.Context, msg db.Message) error {
     payload := MessagePayload{
         To:      msg.Recipient,
         Content: msg.Content,
@@ -32,7 +89,7 @@ func SendMessage(msg db.Message) error {
         return err
     }
 
-    req, err := http.NewRequest("POST", "https://webhook.site/c3f13233-1ed4-429e-9649-8133b3b9c9cd", bytes.NewBuffer(payloadBytes))
+    req, err := http.NewRequestWithContext(ctx, "POST", "https://webhook.site/6d59e78a-2d8a-4ae3-88d4-971485e87f8f", bytes.NewBuffer(payloadBytes))
     if err != nil {
         return err
     }
@@ -68,21 +125,38 @@ func SendMessage(msg db.Message) error {
     return nil
 }
 
+func SendMessageWithRetry(ctx context.Context, msg db.Message) error {
+    operation := func() error {
+        return SendMessage(ctx, msg)
+    }
+
+    bo := backoff.NewExponentialBackOff()
+    bo.MaxElapsedTime = 2 * time.Minute
+
+    err := backoff.Retry(operation, backoff.WithContext(bo, ctx))
+    if err != nil {
+        log.Printf("Failed to send message %d after retries: %v", msg.ID, err)
+    }
+    return err
+}
+
 func StartSendingMessages() {
+    numWorkers := 5
+    pool := NewWorkerPool(numWorkers)
+    defer pool.Shutdown()
+
     ticker := time.NewTicker(2 * time.Minute)
     defer ticker.Stop()
 
     for range ticker.C {
-        messages, err := db.GetUnsentMessages(2)
+        messages, err := db.GetUnsentMessages(10) // Fetch messages in batches
         if err != nil {
             log.Println("Error retrieving messages:", err)
             continue
         }
 
         for _, msg := range messages {
-            if err := SendMessage(msg); err != nil {
-                log.Println("Error sending message:", err)
-            }
+            pool.AddJob(msg)
         }
     }
 }
