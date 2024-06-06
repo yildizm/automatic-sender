@@ -2,6 +2,7 @@ package sender
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -23,7 +24,7 @@ type Response struct {
     MessageID string `json:"messageId"`
 }
 
-func SendMessage(msg db.Message) error {
+func SendMessage(ctx context.Context, msg db.Message) error {
     payload := MessagePayload{
         To:      msg.Recipient,
         Content: msg.Content,
@@ -34,7 +35,7 @@ func SendMessage(msg db.Message) error {
         return err
     }
 
-    req, err := http.NewRequest("POST", "https://webhook.site/6d59e78a-2d8a-4ae3-88d4-971485e87f8f", bytes.NewBuffer(payloadBytes))
+    req, err := http.NewRequestWithContext(ctx, "POST", "https://webhook.site/6d59e78a-2d8a-4ae3-88d4-971485e87f8f", bytes.NewBuffer(payloadBytes))
     if err != nil {
         return err
     }
@@ -103,7 +104,10 @@ func worker(jobs <-chan db.Message, wg *sync.WaitGroup) {
     defer wg.Done()
 
     for msg := range jobs {
-        if err := SendMessage(msg); err != nil {
+        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer cancel()
+
+        if err := SendMessage(ctx, msg); err != nil {
             log.Println("Error sending message:", err)
         }
     }
