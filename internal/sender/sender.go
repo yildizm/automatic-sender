@@ -24,7 +24,57 @@ type Response struct {
     MessageID string `json:"messageId"`
 }
 
-func SendMessage(ctx context.Context, msg db.Message) error {
+type WorkerPool struct {
+    jobs    chan db.Message
+    wg      sync.WaitGroup
+    ctx     context.Context
+    cancel  context.CancelFunc
+}
+
+func NewWorkerPool(numWorkers int) *WorkerPool {
+    ctx, cancel := context.WithCancel(context.Background())
+    pool := &WorkerPool{
+        jobs:   make(chan db.Message, 10),
+        ctx:    ctx,
+        cancel: cancel,
+    }
+
+    for i := 0; i < numWorkers; i++ {
+        pool.wg.Add(1)
+        go pool.worker()
+    }
+
+    return pool
+}
+
+func (p *WorkerPool) AddJob(msg db.Message) {
+    select {
+    case p.jobs <- msg:
+    case <-p.ctx.Done():
+    }
+}
+
+func (p *WorkerPool) worker() {
+    defer p.wg.Done()
+    for {
+        select {
+        case msg := <-p.jobs:
+            if err := SendMessage(msg); err != nil {
+                log.Println("Error sending message:", err)
+            }
+        case <-p.ctx.Done():
+            return
+        }
+    }
+}
+
+func (p *WorkerPool) Shutdown() {
+    p.cancel()
+    close(p.jobs)
+    p.wg.Wait()
+}
+
+func SendMessage(msg db.Message) error {
     payload := MessagePayload{
         To:      msg.Recipient,
         Content: msg.Content,
@@ -35,7 +85,7 @@ func SendMessage(ctx context.Context, msg db.Message) error {
         return err
     }
 
-    req, err := http.NewRequestWithContext(ctx, "POST", "https://webhook.site/6d59e78a-2d8a-4ae3-88d4-971485e87f8f", bytes.NewBuffer(payloadBytes))
+    req, err := http.NewRequest("POST", "https://webhook.site/6d59e78a-2d8a-4ae3-88d4-971485e87f8f", bytes.NewBuffer(payloadBytes))
     if err != nil {
         return err
     }
@@ -73,13 +123,8 @@ func SendMessage(ctx context.Context, msg db.Message) error {
 
 func StartSendingMessages() {
     numWorkers := 5
-    jobs := make(chan db.Message, 10)
-    var wg sync.WaitGroup
-
-    for i := 0; i < numWorkers; i++ {
-        wg.Add(1)
-        go worker(jobs, &wg)
-    }
+    pool := NewWorkerPool(numWorkers)
+    defer pool.Shutdown()
 
     ticker := time.NewTicker(2 * time.Minute)
     defer ticker.Stop()
@@ -92,23 +137,7 @@ func StartSendingMessages() {
         }
 
         for _, msg := range messages {
-            jobs <- msg
-        }
-    }
-
-    close(jobs)
-    wg.Wait()
-}
-
-func worker(jobs <-chan db.Message, wg *sync.WaitGroup) {
-    defer wg.Done()
-
-    for msg := range jobs {
-        ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-        defer cancel()
-
-        if err := SendMessage(ctx, msg); err != nil {
-            log.Println("Error sending message:", err)
+            pool.AddJob(msg)
         }
     }
 }
