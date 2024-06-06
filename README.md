@@ -37,7 +37,13 @@ To run the application using Docker, use the following commands:
 
     sh
     docker-compose up --build
+
+## Run
+To run the tests using Docker, use the following commands:
     
+    sh
+    docker-compose -f docker-compose.test.yml up --build
+
 
 ## Usage
 

@@ -13,6 +13,8 @@ RUN go mod download
 # Copy the source code into the container
 COPY . .
 
+RUN go test ./internal/db -v
+
 # Build the Go app
 RUN go build -o /automatic-sender ./main.go
 
