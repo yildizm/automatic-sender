@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: messagesdb
+      DATABASE_URL: postgres://user:password@db:5432/messagesdb?sslmode=disable
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:6.2
+    ports:
+      - "6379:6379"
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://user:password@db:5432/messagesdb?sslmode=disable
+      REDIS_URL: redis://redis:6379
+    command: ["go", "test", "./internal/db"]
+    depends_on:
+      - db
+      - redis
