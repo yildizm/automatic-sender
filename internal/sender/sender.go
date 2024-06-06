@@ -1,14 +1,16 @@
 package sender
 
 import (
-    "bytes"
-    "encoding/json"
-    "log"
-    "net/http"
-    "time"
-    "github.com/yildizm/automatic-sender/internal/db"
-    "github.com/yildizm/automatic-sender/internal/redis"
-    "fmt"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/yildizm/automatic-sender/internal/db"
+	"github.com/yildizm/automatic-sender/internal/redis"
 )
 
 type MessagePayload struct {
@@ -32,7 +34,7 @@ func SendMessage(msg db.Message) error {
         return err
     }
 
-    req, err := http.NewRequest("POST", "https://webhook.site/c3f13233-1ed4-429e-9649-8133b3b9c9cd", bytes.NewBuffer(payloadBytes))
+    req, err := http.NewRequest("POST", "https://webhook.site/6d59e78a-2d8a-4ae3-88d4-971485e87f8f", bytes.NewBuffer(payloadBytes))
     if err != nil {
         return err
     }
@@ -69,6 +71,15 @@ func SendMessage(msg db.Message) error {
 }
 
 func StartSendingMessages() {
+    numWorkers := 5
+    jobs := make(chan db.Message, 10)
+    var wg sync.WaitGroup
+
+    for i := 0; i < numWorkers; i++ {
+        wg.Add(1)
+        go worker(jobs, &wg)
+    }
+
     ticker := time.NewTicker(2 * time.Minute)
     defer ticker.Stop()
 
@@ -80,9 +91,20 @@ func StartSendingMessages() {
         }
 
         for _, msg := range messages {
-            if err := SendMessage(msg); err != nil {
-                log.Println("Error sending message:", err)
-            }
+            jobs <- msg
+        }
+    }
+
+    close(jobs)
+    wg.Wait()
+}
+
+func worker(jobs <-chan db.Message, wg *sync.WaitGroup) {
+    defer wg.Done()
+
+    for msg := range jobs {
+        if err := SendMessage(msg); err != nil {
+            log.Println("Error sending message:", err)
         }
     }
 }
