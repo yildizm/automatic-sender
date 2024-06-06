@@ -135,14 +135,24 @@ func StartSendingMessages() {
     defer ticker.Stop()
 
     for range ticker.C {
-        messages, err := db.GetUnsentMessages(2)
-        if err != nil {
-            log.Println("Error retrieving messages:", err)
-            continue
-        }
+        var wg sync.WaitGroup
 
-        for _, msg := range messages {
-            pool.AddJob(msg)
+        for {
+            messages, err := db.GetUnsentMessages(10) // Fetch messages in batches
+            if err != nil {
+                log.Println("Error retrieving messages:", err)
+                break
+            }
+
+            if len(messages) == 0 {
+                break
+            }
+
+            for _, msg := range messages {
+                pool.AddJob(msg)
+            }
+
+            wg.Wait()
         }
     }
 }
