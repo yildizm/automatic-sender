@@ -5,6 +5,7 @@ go 1.20
 // toolchain go1.21
 
 require (
+	github.com/cenkalti/backoff/v4 v4.1.0
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/gorilla/mux v1.8.0
 	github.com/lib/pq v1.10.4

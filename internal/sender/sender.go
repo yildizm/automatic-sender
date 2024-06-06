@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/yildizm/automatic-sender/internal/db"
 	"github.com/yildizm/automatic-sender/internal/redis"
-	"golang.org/x/time/rate"
 )
 
 type MessagePayload struct {
@@ -60,7 +60,10 @@ func (p *WorkerPool) worker() {
     for {
         select {
         case msg := <-p.jobs:
-            if err := SendMessage(msg); err != nil {
+            ctx, cancel := context.WithTimeout(p.ctx, 10*time.Second)
+            defer cancel()
+
+            if err := SendMessageWithRetry(ctx, msg); err != nil {
                 log.Println("Error sending message:", err)
             }
         case <-p.ctx.Done():
@@ -74,12 +77,8 @@ func (p *WorkerPool) Shutdown() {
     close(p.jobs)
     p.wg.Wait()
 }
-var rateLimiter = rate.NewLimiter(1, 5)
 
-func SendMessage(msg db.Message) error {
-    if err := rateLimiter.Wait(context.Background()); err != nil {
-        return fmt.Errorf("rate limiter error: %w", err)
-    }
+func SendMessage(ctx context.Context, msg db.Message) error {
     payload := MessagePayload{
         To:      msg.Recipient,
         Content: msg.Content,
@@ -90,7 +89,7 @@ func SendMessage(msg db.Message) error {
         return err
     }
 
-    req, err := http.NewRequest("POST", "https://webhook.site/6d59e78a-2d8a-4ae3-88d4-971485e87f8f", bytes.NewBuffer(payloadBytes))
+    req, err := http.NewRequestWithContext(ctx, "POST", "https://webhook.site/6d59e78a-2d8a-4ae3-88d4-971485e87f8f", bytes.NewBuffer(payloadBytes))
     if err != nil {
         return err
     }
@@ -126,6 +125,21 @@ func SendMessage(msg db.Message) error {
     return nil
 }
 
+func SendMessageWithRetry(ctx context.Context, msg db.Message) error {
+    operation := func() error {
+        return SendMessage(ctx, msg)
+    }
+
+    bo := backoff.NewExponentialBackOff()
+    bo.MaxElapsedTime = 2 * time.Minute
+
+    err := backoff.Retry(operation, backoff.WithContext(bo, ctx))
+    if err != nil {
+        log.Printf("Failed to send message %d after retries: %v", msg.ID, err)
+    }
+    return err
+}
+
 func StartSendingMessages() {
     numWorkers := 5
     pool := NewWorkerPool(numWorkers)
@@ -135,24 +149,14 @@ func StartSendingMessages() {
     defer ticker.Stop()
 
     for range ticker.C {
-        var wg sync.WaitGroup
+        messages, err := db.GetUnsentMessages(10) // Fetch messages in batches
+        if err != nil {
+            log.Println("Error retrieving messages:", err)
+            continue
+        }
 
-        for {
-            messages, err := db.GetUnsentMessages(10) // Fetch messages in batches
-            if err != nil {
-                log.Println("Error retrieving messages:", err)
-                break
-            }
-
-            if len(messages) == 0 {
-                break
-            }
-
-            for _, msg := range messages {
-                pool.AddJob(msg)
-            }
-
-            wg.Wait()
+        for _, msg := range messages {
+            pool.AddJob(msg)
         }
     }
 }
